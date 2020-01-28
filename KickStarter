@@ -1,0 +1,85 @@
+@file:JvmName("KickStarter")
+
+package core
+
+import ru.vtb.jira.rest.core.JiraRestClient
+import ru.vtb.jira.rest.core.jql.JqlConstants
+import ru.vtb.jira.rest.core.misc.RestPathConstants
+import ru.vtb.jira.rest.core.util.RestException
+import java.io.File
+
+import java.io.FileInputStream
+import java.io.IOException
+import java.net.URI
+import java.net.URISyntaxException
+import java.util.Properties
+import java.util.concurrent.ExecutionException
+import java.util.concurrent.Executors
+
+/**
+ * Создание соединения с Jira по средствам протокола HTTP (80 порт) - метод connect()
+ * proxy = ProxyHost("proxy", 3128) - Для использования Proxy
+ *
+ * User: Evgeniy Savkin
+ * Email: esavkin@vtb.ru
+ * Date: 09.10.2019
+ */
+open class KickStarter : JqlConstants, RestPathConstants {
+    private val CONFIG_FILE = "config.properties"
+    var jiraRestClient: JiraRestClient? = null
+
+
+    @Throws(URISyntaxException::class, IOException::class, ExecutionException::class, InterruptedException::class)
+    fun connectToJIRA() {
+        val config = Properties()
+        val path = Thread.currentThread().contextClassLoader.getResource("").path
+        val propertyFilePath = path + CONFIG_FILE
+        config.load(FileInputStream(propertyFilePath))
+        val testSystemUrl = config.getProperty("URL_PARAM")
+        val login = config.getProperty("LOGIN_PARAM")
+        val password = config.getProperty("PASSWORD_PARAM")
+        val executorService = Executors.newFixedThreadPool(100)
+        val uri = URI(testSystemUrl)
+        jiraRestClient = JiraRestClient(executorService)
+        jiraRestClient!!.connect(uri, login, password)
+
+    }
+
+    companion object {
+        @Throws(InterruptedException::class, RestException::class, ExecutionException::class, IOException::class)
+        @JvmStatic
+        fun main(args: Array<String>) {
+            val start = PublicFunctions()
+
+            /** ISSUE WORK (работа с задачами создание, удаление) **/
+            start.createIssue(issueAuthor = "buddy", issueTitle = "TEST1", textDiscription = "HELLO FROM TEST1")
+            start.searchIssue(query = "project = Jira_Api_test and status = Done order by created asc")
+
+            /**
+             * CHANGE LEBELS (удаление/добавление меток)
+             * true - добавить
+             * false - удалить
+             * File - массовое удаление/добавление из файла
+             */
+            start.changeIssueLabel(labelName = "SEE", issueKey = "JAT-52", addLabel = true)
+            start.changeIssueLabel(labelName = "SEE", issueKey = "JAT-52", addLabel = false)
+
+            /** Массовый label change **/
+            File("src/main/resources/txt/labels_jat.txt").forEachLine {
+                start.changeIssueLabel(labelName = "DEFB2", issueKey = it, addLabel = true)
+            }
+
+            /** SAVE FILE (удаление/добавление меток) **/
+            start.saveAttachment(issueKey = "JAT-52")
+
+            /** ADD COMMENT (добавить комментарий) **/
+            start.addCommentToIssue(issueKey = "JAT-52", comment = "this is new comment")
+
+            /** EXPERIMENTS **/
+            start.getAllProjects()
+            start.changeIssueEnvironment(issueKey = "JAT-52")
+
+            println("[DONE]")
+        }
+    }
+}
