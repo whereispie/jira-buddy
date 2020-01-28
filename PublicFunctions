@@ -1,0 +1,186 @@
+@file:JvmName("PublicFunctions")
+@file:Suppress("Annotator", "Annotator", "Annotator", "Annotator")
+
+package core
+
+import client.IssueWorks
+import com.google.gson.Gson
+import com.google.gson.GsonBuilder
+import ru.vtb.jira.rest.core.domain.*
+import ru.vtb.jira.rest.core.domain.update.IssueUpdate
+import ru.vtb.jira.rest.core.domain.update.Operation
+import ru.vtb.jira.rest.core.misc.JsonConstants.PRIORITY_LOW
+import ru.vtb.jira.rest.core.util.RestException
+
+import java.io.IOException
+import java.util.concurrent.ExecutionException
+import ru.vtb.jira.rest.core.domain.update.FieldOperation
+import ru.vtb.jira.rest.core.jql.EField
+import ru.vtb.jira.rest.core.jql.JqlSearchBean
+import ru.vtb.jira.rest.core.misc.JsonConstants
+import java.io.File
+import java.io.FileWriter
+import java.net.URISyntaxException
+import java.util.*
+import sun.plugin2.util.PojoUtil.toJson
+
+
+/**
+ * Class is implements IssueWorks interface & override it functions
+ * init block - get connection to Jira via connectToJIRA() method
+ * User: Evgeniy Savkin (vtb210189)
+ * Email: esavkin@vtb.ru
+ * Date: 29.10.2019
+ */
+@Suppress("NAME_SHADOWING", "DEPRECATION")
+class PublicFunctions : KickStarter(), IssueWorks {
+
+    init {
+        connectToJIRA()
+    }
+
+
+    @Throws(RestException::class, IOException::class, ExecutionException::class, InterruptedException::class)
+    override fun getAllProjects() {
+        val future = jiraRestClient?.projectClient?.allProjects
+        val projectBeans = future?.get()
+        val gson = GsonBuilder().setPrettyPrinting().create();
+        try {
+            FileWriter("c:\\test\\staff.json").use { writer -> gson.toJson(projectBeans, writer) } //TODO сделать вывод в формате на консоль или в resources
+        } catch (e: IOException) {
+            e.printStackTrace()
+        }
+        projectBeans?.forEach(::println)
+    }
+
+
+    @Throws(ExecutionException::class, InterruptedException::class)
+    override fun createIssue(issueAuthor: String, issueTitle: String, textDiscription: String): String? {
+        val issue = IssueBean()
+        val fields = FieldsBean()
+        fields.description = textDiscription
+        fields.summary = issueTitle
+        val project = ProjectBean()
+        project.key = "JAT"
+        fields.project = project
+        val issueType = IssuetypeBean()
+        issueType.name = "Bug"
+        fields.issuetype = issueType
+        val priority = PriorityBean()
+        priority.name = PRIORITY_LOW
+        fields.priority = priority
+
+        val userBean = UserBean()
+        userBean.name = issueAuthor
+        fields.assignee = userBean
+        val labels = ArrayList<String>()
+        labels.add("EFR")
+        labels.add("bug")
+        labels.add("AT")
+        fields.labels = labels
+        issue.fields = fields
+
+        val future = jiraRestClient?.issueClient?.createIssue(issue)
+        val issueResponse = future?.get()
+        val issueKey = issueResponse?.key
+        if (issueResponse != null) {
+            if (issueKey != null) {
+                println(issueKey)
+            } else {
+                println(issueResponse.error?.errors)
+                println(issueResponse.error?.errorMessages)
+                println(issueResponse.error?.errors?.project)
+                println(issueResponse.error?.errors?.subtasks)
+                println(issueResponse.error?.errors?.attachment)
+                println(issueResponse.error?.errors?.issuelinks)
+                println(issueResponse.error?.errors?.issuetype)
+                println(issueResponse.error?.errors?.reporter)
+                println(issueResponse.error?.errors?.assignee)
+                println(issueResponse.error?.errors?.environment)
+                println(issueResponse.error?.errors?.filterName)
+                println(issueResponse.error?.errors?.versions)
+                println(issueResponse.error?.errors?.components)
+            }
+        }
+        return issueKey
+    }
+
+
+    @Throws(RestException::class, IOException::class, ExecutionException::class, InterruptedException::class)
+    override fun searchIssue(query: String) {
+        val jsb = JqlSearchBean()
+        jsb.jql = query
+        jsb.addField(EField.ISSUE_KEY) //
+        val future = jiraRestClient?.searchClient?.searchIssues(jsb)
+        val jqlSearchResult = future?.get()
+        return println(jqlSearchResult?.issues.toString())
+    }
+
+    /**
+     * Удаление метки по соответствию текста из:
+     * Среды:     val textEnvironment = issue?.fields?.description, не забыть сделать проверку на null
+     * Описания:  val textDiscription = issue?.fields?.environment
+     *
+     * when
+     *      textEnvironment?.contains("DEFB3")!! -> operations.add(FieldOperation(Operation.SET.getName(), newLebels))
+     *
+     */
+    override fun changeIssueLabel(labelName: String, issueKey: String, addLabel: Boolean) {
+        println(issueKey)
+        val future = jiraRestClient?.issueClient?.getIssueByKey(issueKey)
+        val issue = future?.get()
+        if (issue != null) {
+            val oldLabels = issue.fields?.labels
+            val newLebels = oldLabels?.plus(labelName)
+            val issueUpdate = IssueUpdate()
+            val update = issueUpdate.update
+            val operations = ArrayList<FieldOperation>()
+            when (addLabel) {
+                true -> operations.add(FieldOperation(Operation.SET.getName(), newLebels))
+                false -> operations.add(FieldOperation(Operation.REMOVE.getName(), labelName))
+            }
+            update[JsonConstants.PROP_LABELS] = operations
+            val updateFuture = jiraRestClient?.issueClient?.updateIssue(issueKey, issueUpdate)
+            val issueBean = updateFuture?.get()
+        } else {
+            println("[ISSUE num. $issueKey is missing]")
+        }
+    }
+
+
+    @Throws(URISyntaxException::class, IOException::class, RestException::class)
+    override fun addCommentToIssue(issueKey: String, comment: String) {
+        val commentBean = CommentBean()
+        commentBean.body = comment
+        jiraRestClient?.issueClient?.addCommentToIssue(issueKey, commentBean)
+        println("Comment: {$comment} was added to {$issueKey}")
+    }
+
+
+    @Throws(IOException::class, RestException::class, ExecutionException::class, InterruptedException::class)
+    override fun changeIssueEnvironment(issueKey: String) {
+        val future = jiraRestClient?.issueClient?.getIssueByKey(issueKey)
+        val issue = future?.get()
+        val environment = issue?.fields?.environment
+        val newEnvironment = environment + "hello"
+        val issueUpdate = IssueUpdate()
+        val update = issueUpdate.update
+        val operations = ArrayList<FieldOperation>()
+        operations.add(FieldOperation(Operation.SET.getName(), newEnvironment))
+        update[JsonConstants.PROP_ENVIRONMENT] = operations
+        val updateFuture = jiraRestClient?.issueClient?.updateIssue(issueKey, issueUpdate)
+        val issueBean = updateFuture?.get()
+//        val updateIssueEnvironment = issueBean?.fields?.environment
+    }
+
+    @Throws(IOException::class, RestException::class, ExecutionException::class, InterruptedException::class)
+    override fun saveAttachment(issueKey: String) {
+        val classLoader = this.javaClass.classLoader
+        val file = File(Objects.requireNonNull(classLoader.getResource("JS.txt")).file)
+        val file2 = File(Objects.requireNonNull(classLoader.getResource("s1200.png")).file)
+        if (file.exists()) {
+            val listFuture = jiraRestClient?.issueClient?.saveAttachmentToIssue("JAT-52", file, file2)
+            val attachmentBeen = listFuture?.get()
+        }
+    }
+}
