@@ -1,0 +1,216 @@
+package efr.helpers;
+
+import efr.helpers.EnumHelper.Timeout;
+import org.openqa.selenium.TimeoutException;
+import ru.sbtqa.tag.qautils.properties.Props;
+import java.text.ParseException;
+import java.text.SimpleDateFormat;
+import java.time.*;
+import java.time.format.DateTimeFormatter;
+import java.time.temporal.ChronoUnit;
+import java.util.Date;
+import java.util.Locale;
+
+import static efr.helpers.EnumHelper.*;
+
+
+/**
+ * Класс для работы с датой и временем
+ */
+public enum TimeHelper {
+    ddMMyyyy("dd.MM.yyyy"),
+    ddMMyyyy_hhmm("dd.MM.yyyy hh:mm"),
+    ddMMyyyy_hhmmss("dd.MM.yyyy hh:mm:ss"),
+    ddMMyyyy_HHmm("dd.MM.yyyy HH:mm"),
+    ddMMyyyy_HHmmss("dd.MM.yyyy HH:mm:ss"),
+    wsdl1("MM/dd/yyyy"),
+    wsdl2("dd/MM/yyyy"),
+    mm("mm"),
+    HH("HH"),
+    MMyy("MMyy"),
+    yyyy("yyyy");
+    private final ThreadLocal<SimpleDateFormat> threadLocalSimpleDateFormat;
+
+    TimeHelper(final String format) {
+        threadLocalSimpleDateFormat = new ThreadLocal<SimpleDateFormat>() {
+            @Override
+            protected SimpleDateFormat initialValue() {
+                return new SimpleDateFormat(format);
+            }
+        };
+    }
+
+    /**
+     * Парсит в соответствии с форматом, на котором был вызван данный метод,
+     * потоко-безопасен за счет ThreadLocal
+     *
+     * @param source исходная строка в требуемом формате
+     * @return полученная дата-время
+     */
+    public Date parse(String source) {
+        try {
+            return threadLocalSimpleDateFormat.get().parse(source);
+        } catch (ParseException e) {
+            return FailHelper.system("Дата не соответствует формату: " + source + " " + threadLocalSimpleDateFormat.get().toPattern());
+        }
+    }
+
+    /**
+     * Форматирует в соответствии с форматом, на котором был вызван данный метод,
+     * потоко-безопасен за счет ThreadLocal
+     *
+     * @param date исходная дата-время
+     * @return полученная строка
+     */
+    public String format(Date date) {
+        return threadLocalSimpleDateFormat.get().format(date);
+    }
+
+    /**
+     * Форматирует в соответствии с форматом, на котором был вызван данный метод,
+     * потоко-безопасен за счет ThreadLocal
+     *
+     * @return строк даты-времени, полученной в момент вызова метода
+     */
+    public String formatNow() {
+        return threadLocalSimpleDateFormat.get().format(new Date());
+    }
+
+    /**
+     * Форматирует в соответствии с форматом, на котором был вызван данный метод,
+     * потоко-безопасен за счет ThreadLocal
+     *
+     * @return строк даты-времени, полученной в момент вызова метода + переданная разница
+     * */
+    public String formatThen(int diff, ChronoUnit chronoUnit) {
+        Instant inst = Instant.now();
+        if (chronoUnit == ChronoUnit.YEARS) {
+            inst.plus(diff * 350, ChronoUnit.DAYS);
+        }
+        return format(Date.from(inst));
+    }
+
+    private static ThreadLocal<Long[]> initTime = ThreadLocal.withInitial(() -> new Long[13]);
+
+    public static Long getDefaultTimeoutInSeconds() {
+        return Long.valueOf(Props.get("page.timer_default.timeout")) / 1000;
+    }
+
+    public static Long getShortTimeoutInSeconds() {
+        return Long.valueOf(Props.get("page.timer_short.timeout")) / 1000;
+    }
+
+    public static Long getLongTimeoutInSeconds() {
+        return Long.valueOf(Props.get("page.timer_long.timeout")) / 1000;
+    }
+
+    public static Long getDefaultTimeoutInMilliseconds() {
+        return Long.valueOf(Props.get("page.timer_default.timeout"));
+    }
+
+    public static Long getShortTimeoutInMilliseconds() {
+        return Long.valueOf(Props.get("page.timer_short.timeout"));
+    }
+
+    public static Long getLongTimeoutInMilliseconds() {
+        return Long.valueOf(Props.get("page.timer_long.timeout"));
+    }
+
+    public static void initTimeout() {
+        initTimeout(1);
+    }
+
+
+    public static void initTimeout(Integer numOfTimeoutInit) {
+        Date date = new Date();
+        Long[] lastTimes = initTime.get();
+        lastTimes[numOfTimeoutInit] = date.getTime();
+        initTime.set(lastTimes);
+    }
+
+    public static boolean isTimeout(String assertText, Timeout range) {
+        return isTimeout(assertText, range, 1);
+    }
+
+    public static boolean isTimeout(String assertText, Timeout range, Integer numOfTimeoutInit) {
+        switch (range) {
+            case TIMER_DEFAULT:
+                if (TimeHelper.initTime.get()[numOfTimeoutInit] < (instantTime() - getDefaultTimeoutInMilliseconds())) {
+                    throw new TimeoutException(assertText + "\n" + Constants.TIMEOUT_MESSAGE);
+                } else {
+                    return false;
+                }
+            case TIMER_SHORT:
+                if (TimeHelper.initTime.get()[numOfTimeoutInit] < (instantTime() - getShortTimeoutInMilliseconds())) {
+                    throw new TimeoutException(assertText + "\n" + Constants.TIMEOUT_MESSAGE);
+                } else {
+                    return false;
+                }
+            case TIMER_LONG:
+                if (TimeHelper.initTime.get()[numOfTimeoutInit] < (instantTime() - getLongTimeoutInMilliseconds())) {
+                    throw new TimeoutException(assertText + "\n" + Constants.TIMEOUT_MESSAGE);
+                } else {
+                    return false;
+                }
+        }
+        return true;
+    }
+
+    /**
+     * Метод возвращает указанную единицу времени в custom формате вида "dd.MM.yyyy"
+     * <p>
+     * String lastDayOfCurrentMonth = calendarShifter(LAST_DAY_OF_MONTH, "dd.MM.yyyy");
+     *
+     * @return last/first day formatted date etc value
+     */
+    public static String calendarShifter(DateManipulator timeUnit, String format) {
+        ZoneId z = ZoneId.of("Europe/Moscow");
+        LocalDate date = LocalDate.now(z);
+        LocalDate first = date.with(timeUnit.getValue());
+        DateTimeFormatter formatter = DateTimeFormatter.ofPattern(format);
+        return first.format(formatter);
+    }
+
+    /**
+     * Метод возвращает текущее время в миллесекундах
+     *
+     * @return instant time in milliseconds
+     */
+    public static long instantTime() {
+        return Instant.now().toEpochMilli();
+    }
+
+    /**
+     * Метод позволяет манипулировать с датой и временем прибавляя/удаляя дни/месяцы и устанавливать custom формат вывода
+     * <p>
+     * setField("Дата завершения план", instantShifter(DAYS, PLUS, 365, "dd.MM.yyyy")
+     *
+     * @param timeUnit      тип поля из enum (DAYS,HOURS,YEARS)
+     * @param number        цифра (на сколько уменьшить, увеличить)
+     * @param formatExample формат вида (dd.MM.yyyy HH:mm:ss - 24 hours HH, dd.MM.yyyy)
+     * @return String in custom format after option manipulation
+     */
+    public static String instantShifter(ChronoUnit timeUnit, TimeManipulator option, long number, String formatExample) {
+        Instant time = Instant.now();
+        Instant instant = null;
+        if (option.getValue().matches("PLUS")) instant = time.plus(number, timeUnit);
+        if (option.getValue().matches("MINUS")) instant = time.minus(number, timeUnit);
+        ZoneId z = ZoneId.of("Europe/Moscow");
+        assert instant != null;
+        ZonedDateTime zdt = instant.atZone(z);
+        DateTimeFormatter format = DateTimeFormatter.ofPattern(formatExample).withLocale(Locale.getDefault());
+        return zdt.format(format);
+    }
+
+    /**
+     * Метод возвращает текущее время в custom формате
+     *
+     * @return instant time in custom format
+     * dd.MM.yyyy HH:mm:ss - 24 hours HH
+     * dd.MM.yyyy          - 12 hours format
+     */
+    public static String instantDate(String formatExample) {
+        return LocalDateTime.now()
+                .format(DateTimeFormatter.ofPattern(formatExample));
+    }
+}
